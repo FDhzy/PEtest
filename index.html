@@ -17,19 +17,30 @@
 </script><script>(function(root){
   function normalize(s){return String(s).normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]/gu,'');}
   function tokens(s){return [...new Set(String(s).trim().split(/\s+/u).map(normalize).filter(Boolean))];}
+  function aliases(s){return normalize(s).replace(/[8八][段断锻][锦绵]/g,'八段锦');}
+  function smartTokens(s){
+    const parts=String(s).normalize('NFKC').split(/[\s\p{P}\p{S}]+/u).filter(Boolean);
+    return [...new Set(parts.flatMap(part=>{
+      const joined=part.split(/以及|还有|和|与|及/u);
+      return joined.length>1&&joined.every(x=>normalize(x).length>=2)?joined:[part];
+    }).map(aliases).filter(Boolean))];
+  }
   function canonical(s){return normalize(s).replace(/第([一二三四五六七八九十])式/g,(_,n)=>'第'+('一二三四五六七八九十'.indexOf(n)+1)+'式').replace(/是谁|是什么|叫什么|名称是|指的是|的是|的|应该|以下|下列/g,'').replace(/比赛/g,'竞赛').replace(/采莲/g,'踩莲').replace(/创办人|创立者|创始者/g,'创始人').replace(/多少式|几式/g,'共式').replace(/创编者/g,'创始人');}
   function grams(s){const a=Array.from(s),out=new Set();for(let i=0;i<a.length-1;i++)out.add(a[i]+a[i+1]);return out;}
   let indexed=null,stats=null;
-  function prepare(rows){if(indexed===rows)return;indexed=rows;const df=new Map();rows.forEach(r=>{r.searchText=normalize(r.display+' '+(r.content||'')+' '+(r.options||[]).map(o=>o.text).join(' '));r.grams=grams(canonical(r.searchText));for(const g of r.grams)df.set(g,(df.get(g)||0)+1);});stats={df,n:rows.length};}
+  function prepare(rows){if(indexed===rows)return;indexed=rows;const df=new Map();rows.forEach(r=>{r.searchText=normalize(r.display+' '+(r.content||'')+' '+(r.options||[]).map(o=>o.text).join(' '));r.grams=grams(canonical(aliases(r.searchText)));for(const g of r.grams)df.set(g,(df.get(g)||0)+1);});stats={df,n:rows.length};}
   function search(rows,query,filter,saved,mode='smart'){
-    prepare(rows);const ts=tokens(query),q=canonical(query),qg=grams(q);
+    prepare(rows);const ts=mode==='exact'?tokens(query):smartTokens(query),q=canonical(aliases(query)),qg=grams(q);
     const selected=rows.filter(r=>filter==='all'||filter===r.type||(filter==='saved'&&saved.has(r.text)));
     if(!ts.length)return String(query).trim()?[]:selected;
     const exact=[],related=[];
     const weights=new Map([...qg].map(g=>[g,Math.log(1+(stats.n+1)/((stats.df.get(g)||0)+1))]));
     const total=[...weights.values()].reduce((a,b)=>a+b,0);
     for(const r of selected){
-      if(ts.every(t=>r.searchText.includes(t))){exact.push({...r,matchType:'exact',score:r.normalized===normalize(query)?3:r.normalized.startsWith(normalize(query))?2:1});continue;}
+      const searchText=mode==='exact'?r.searchText:aliases(r.searchText);
+      if(ts.every(t=>searchText.includes(t))){exact.push({...r,matchType:'exact',score:(mode==='exact'?r.normalized:aliases(r.normalized))===(mode==='exact'?normalize(query):aliases(query))?3:(mode==='exact'?r.normalized:aliases(r.normalized)).startsWith(mode==='exact'?normalize(query):aliases(query))?2:1});continue;}
+      // Explicit keyword groups must all occur, regardless of order or distance.
+      if(ts.length>1)continue;
       if(mode==='exact'||q.length<3)continue;
       let hit=0,sum=0;for(const g of qg)if(r.grams.has(g)){hit++;sum+=weights.get(g);}
       const coverage=total?sum/total:0;
@@ -77,5 +88,6 @@ $('query').addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()
 })();
 </script>
 </body></html>
+
 
 
